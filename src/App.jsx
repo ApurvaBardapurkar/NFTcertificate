@@ -1,13 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ethers } from 'ethers'
 import './App.css'
 
 const CONTRACT_ABI = [
-  'function mintWorkshopCertificate(string studentName,string mobileNumber,string branch) external returns (uint256)',
+  'function mintWorkshopCertificate(string studentName,string mobileNumber,string branch,string tokenURI) external returns (uint256)',
   'function tokenURI(uint256 tokenId) view returns (string)',
   'function hasMinted(address) view returns (bool)',
   'function totalSupply() view returns (uint256)',
-  'event CertificateMinted(uint256 indexed tokenId,address indexed recipient,string studentName,string mobileNumber,string branch)',
+  'event CertificateMinted(uint256 indexed tokenId,address indexed recipient,string studentName,string mobileNumber,string branch,string tokenURI)',
 ]
 
 function normalizeExplorerBase(url) {
@@ -20,22 +20,75 @@ function shortAddr(addr) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
 }
 
-function parseDataUriJsonToken(tokenUri) {
-  if (!tokenUri) return null
-  const prefix = 'data:application/json;base64,'
-  if (!tokenUri.startsWith(prefix)) return null
-  try {
-    const b64 = tokenUri.slice(prefix.length)
-    const jsonStr = atob(b64)
-    const json = JSON.parse(jsonStr)
-    return json
-  } catch {
-    return null
-  }
-}
-
 function safeText(v) {
   return typeof v === 'string' ? v : ''
+}
+
+function ipfsToGateway(url, gatewayBase) {
+  if (!url) return ''
+  if (url.startsWith('ipfs://')) return `${gatewayBase}${url.slice('ipfs://'.length)}`
+  return url
+}
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n))
+}
+
+function drawCertificate({ canvas, templateImg, studentName }) {
+  const ctx = canvas.getContext('2d')
+  if (!ctx || !templateImg?.naturalWidth) return
+
+  canvas.width = templateImg.naturalWidth
+  canvas.height = templateImg.naturalHeight
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  ctx.drawImage(templateImg, 0, 0, canvas.width, canvas.height)
+
+  const name = (studentName || '').trim()
+  if (!name) return
+
+  // Position: centered under "This Certificate is Proudly Presented to:"
+  // Tuned to this template (1024x768).
+  const x = canvas.width * 0.5
+  const y = canvas.height * 0.435
+  const maxTextWidth = canvas.width * 0.72
+
+  // Gold-ish color matching the certificate headline
+  const gold = '#B88A2A'
+  const shadow = 'rgba(0,0,0,0.25)'
+
+  // Auto-fit font size for long names
+  let fontSize = Math.round(canvas.width * 0.055) // ~56 at 1024w (bigger as requested)
+  fontSize = clamp(fontSize, 34, 72)
+
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+
+  while (fontSize > 24) {
+    ctx.font = `700 ${fontSize}px "Georgia", "Times New Roman", serif`
+    const w = ctx.measureText(name).width
+    if (w <= maxTextWidth) break
+    fontSize -= 2
+  }
+
+  ctx.shadowColor = shadow
+  ctx.shadowBlur = 6
+  ctx.shadowOffsetX = 0
+  ctx.shadowOffsetY = 2
+
+  // subtle stroke for clarity
+  ctx.lineWidth = 4
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)'
+  ctx.strokeText(name, x, y)
+
+  ctx.fillStyle = gold
+  ctx.fillText(name, x, y)
+
+  // reset shadow
+  ctx.shadowColor = 'transparent'
+  ctx.shadowBlur = 0
+  ctx.shadowOffsetX = 0
+  ctx.shadowOffsetY = 0
 }
 
 async function ensureMstNetwork(ethereum) {
@@ -80,6 +133,12 @@ export default function App() {
   )
   const contractAddress = import.meta.env.VITE_CONTRACT_ADDRESS
   const chainName = import.meta.env.VITE_CHAIN_NAME || 'MST Testnet'
+  // Use 5175 by default; 5174 is often taken by Vite when 5173 is busy
+  const ipfsApiBase = import.meta.env.VITE_IPFS_BACKEND || 'http://localhost:5175'
+  const pinataGateway = import.meta.env.VITE_PINATA_GATEWAY || 'https://gateway.pinata.cloud/ipfs/'
+
+  const templateImgRef = useRef(null)
+  const canvasRef = useRef(null)
 
   const [wallet, setWallet] = useState({
     status: 'idle', // idle | connecting | connected | error
@@ -100,6 +159,9 @@ export default function App() {
     tokenId: '',
     tokenUri: '',
     tokenMeta: null,
+    imageIpfs: '',
+    imageGateway: '',
+    metadataGateway: '',
     error: '',
   })
 
@@ -173,6 +235,9 @@ export default function App() {
       tokenId: '',
       tokenUri: '',
       tokenMeta: null,
+      imageIpfs: '',
+      imageGateway: '',
+      metadataGateway: '',
       error: '',
     })
 
@@ -185,6 +250,54 @@ export default function App() {
 
       await ensureMstNetwork(window.ethereum)
 
+      // 1) Render certificate image (name in gold) and upload to IPFS via backend
+      const templateImg = templateImgRef.current
+      const canvas = canvasRef.current
+      if (!templateImg || !canvas) throw new Error('Certificate template not ready.')
+      drawCertificate({ canvas, templateImg, studentName: form.studentName.trim() })
+
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png', 0.95))
+      if (!blob) throw new Error('Failed to generate certificate image.')
+
+      const imgForm = new FormData()
+      imgForm.append('file', blob, 'certificate.png')
+      const imgRes = await fetch(`${ipfsApiBase}/api/ipfs/certificate`, {
+        method: 'POST',
+        body: imgForm,
+      })
+      if (!imgRes.ok) {
+        const t = await imgRes.text().catch(() => '')
+        throw new Error(`IPFS image upload failed: ${t || imgRes.status}`)
+      }
+      const imgJson = await imgRes.json()
+
+      // 2) Build metadata and upload JSON to IPFS
+      const metaBody = {
+        name: `MIT Workshop Certificate #${(stats.totalSupply ? Number(stats.totalSupply) + 1 : '') || ''}`.trim(),
+        description:
+          'Official on-chain participation certificate issued by Masterstroke Academy for the MST Blockchain Workshop.',
+        image: imgJson.ipfsUri,
+        attributes: [
+          { trait_type: 'Event Name', value: 'MST Blockchain Workshop' },
+          { trait_type: 'Event Place', value: 'MIT College of Engineering, Alandi' },
+          { trait_type: 'Student Name', value: form.studentName.trim() },
+          { trait_type: 'Mobile Number', value: form.mobileNumber.trim() },
+          { trait_type: 'Branch', value: form.branch.trim() },
+          { trait_type: 'Issuing Authority', value: 'Masterstroke Academy' },
+        ],
+      }
+
+      const metaRes = await fetch(`${ipfsApiBase}/api/ipfs/metadata`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(metaBody),
+      })
+      if (!metaRes.ok) {
+        const t = await metaRes.text().catch(() => '')
+        throw new Error(`IPFS metadata upload failed: ${t || metaRes.status}`)
+      }
+      const metaJson = await metaRes.json()
+
       const provider = new ethers.BrowserProvider(window.ethereum)
       const signer = await provider.getSigner()
       const c = new ethers.Contract(contractAddress, CONTRACT_ABI, signer)
@@ -193,6 +306,7 @@ export default function App() {
         form.studentName.trim(),
         form.mobileNumber.trim(),
         form.branch.trim(),
+        metaJson.ipfsUri,
       )
 
       setMintState((m) => ({ ...m, status: 'pending', txHash: tx.hash }))
@@ -219,7 +333,12 @@ export default function App() {
       if (tokenId) {
         try {
           tokenUri = await c.tokenURI(tokenId)
-          tokenMeta = parseDataUriJsonToken(tokenUri)
+          // Try to fetch off-chain metadata for preview
+          const gatewayUrl = ipfsToGateway(tokenUri, pinataGateway)
+          if (gatewayUrl) {
+            const r = await fetch(gatewayUrl)
+            if (r.ok) tokenMeta = await r.json()
+          }
         } catch {
           tokenUri = ''
           tokenMeta = null
@@ -232,6 +351,9 @@ export default function App() {
         tokenId,
         tokenUri,
         tokenMeta,
+        imageIpfs: imgJson.ipfsUri,
+        imageGateway: imgJson.gatewayUrl,
+        metadataGateway: metaJson.gatewayUrl,
         error: '',
       }))
       await refreshStats()
@@ -506,22 +628,64 @@ export default function App() {
                   {safeText(mintState.tokenMeta?.image) ? (
                     <img
                       className="certImg"
-                      src={mintState.tokenMeta.image}
+                      src={ipfsToGateway(mintState.tokenMeta.image, pinataGateway)}
                       alt={safeText(mintState.tokenMeta?.name) || 'Certificate NFT'}
                     />
                   ) : (
                     <div className="certEmpty">
                       Mint your certificate to preview it here.
                       <div className="certEmptyHint">
-                        (After minting we render the on-chain <code>tokenURI</code> image.)
+                        (After minting we pin your personalized certificate image to IPFS.)
                       </div>
                     </div>
                   )}
                 </div>
               </div>
+
+              <div className="kv">
+                <div className="k">IPFS</div>
+                <div className="v vLinks">
+                  <a
+                    className={`linkBtn ${mintState.metadataGateway ? '' : 'disabled'}`}
+                    href={mintState.metadataGateway || undefined}
+                    target={mintState.metadataGateway ? '_blank' : undefined}
+                    rel={mintState.metadataGateway ? 'noreferrer' : undefined}
+                    aria-disabled={!mintState.metadataGateway}
+                    onClick={(e) => {
+                      if (!mintState.metadataGateway) e.preventDefault()
+                    }}
+                  >
+                    View Metadata
+                  </a>
+                  <a
+                    className={`linkBtn ${mintState.imageGateway ? '' : 'disabled'}`}
+                    href={mintState.imageGateway || undefined}
+                    target={mintState.imageGateway ? '_blank' : undefined}
+                    rel={mintState.imageGateway ? 'noreferrer' : undefined}
+                    aria-disabled={!mintState.imageGateway}
+                    onClick={(e) => {
+                      if (!mintState.imageGateway) e.preventDefault()
+                    }}
+                  >
+                    View Certificate Image
+                  </a>
+                </div>
+              </div>
             </div>
           </section>
         </main>
+
+        {/* Hidden image + hidden canvas (used during mint) */}
+        <img
+          ref={templateImgRef}
+          src="/certificate-template.jpg"
+          alt=""
+          className="hiddenAsset"
+          onLoad={() => {
+            // template ready; nothing to render until mint
+          }}
+        />
+        <canvas ref={canvasRef} className="hiddenAsset" />
 
         <footer className="footer">
           <div>
