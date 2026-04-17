@@ -15,6 +15,9 @@ dist-ssr
 # Env (never commit secrets)
 .env
 
+# Vite cache
+.vite
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
