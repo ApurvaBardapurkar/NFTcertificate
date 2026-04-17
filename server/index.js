@@ -1,7 +1,9 @@
-import 'dotenv/config'
+import dotenv from 'dotenv'
 import cors from 'cors'
 import express from 'express'
 import multer from 'multer'
+import path from 'path'
+import { fileURLToPath } from 'url'
 
 const app = express()
 app.use(cors())
@@ -9,11 +11,23 @@ app.use(express.json({ limit: '2mb' }))
 
 const upload = multer({ storage: multer.memoryStorage() })
 
-const PINATA_JWT = process.env.PINATA_JWT
-const PINATA_GATEWAY = process.env.PINATA_GATEWAY || 'https://gateway.pinata.cloud/ipfs/'
+// Load .env reliably (works even if process CWD is different)
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+dotenv.config({ path: path.resolve(process.cwd(), '.env') })
+dotenv.config({ path: path.resolve(__dirname, '..', '.env') })
+
+function getPinataJwt() {
+  return (process.env.PINATA_JWT || '').trim()
+}
+
+function getGatewayBase() {
+  const v = (process.env.PINATA_GATEWAY || 'https://gateway.pinata.cloud/ipfs/').trim()
+  return v.endsWith('/') ? v : `${v}/`
+}
 
 function requireJwt() {
-  if (!PINATA_JWT) {
+  if (!getPinataJwt()) {
     const err = new Error('Missing PINATA_JWT in server environment')
     err.statusCode = 500
     throw err
@@ -28,7 +42,7 @@ async function pinFileToPinata({ fileBuffer, fileName, contentType }) {
 
   const res = await fetch('https://api.pinata.cloud/pinning/pinFileToIPFS', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${PINATA_JWT}` },
+    headers: { Authorization: `Bearer ${getPinataJwt()}` },
     body: form,
   })
 
@@ -46,7 +60,7 @@ async function pinJsonToPinata(json) {
   const res = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${PINATA_JWT}`,
+      Authorization: `Bearer ${getPinataJwt()}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(json),
@@ -61,7 +75,7 @@ async function pinJsonToPinata(json) {
 }
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true })
+  res.json({ ok: true, hasPinataJwt: !!getPinataJwt() })
 })
 
 // Upload rendered certificate image (PNG/JPG) to IPFS
@@ -77,10 +91,11 @@ app.post('/api/ipfs/certificate', upload.single('file'), async (req, res) => {
     })
 
     const ipfsHash = pinned.IpfsHash
+    const gateway = getGatewayBase()
     res.json({
       ipfsHash,
       ipfsUri: `ipfs://${ipfsHash}`,
-      gatewayUrl: `${PINATA_GATEWAY}${ipfsHash}`,
+      gatewayUrl: `${gateway}${ipfsHash}`,
     })
   } catch (e) {
     res.status(500).json({ error: e?.message || 'Upload failed' })
@@ -103,10 +118,11 @@ app.post('/api/ipfs/metadata', async (req, res) => {
     })
 
     const ipfsHash = pinned.IpfsHash
+    const gateway = getGatewayBase()
     res.json({
       ipfsHash,
       ipfsUri: `ipfs://${ipfsHash}`,
-      gatewayUrl: `${PINATA_GATEWAY}${ipfsHash}`,
+      gatewayUrl: `${gateway}${ipfsHash}`,
     })
   } catch (e) {
     res.status(500).json({ error: e?.message || 'Upload failed' })

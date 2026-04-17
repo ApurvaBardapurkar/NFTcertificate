@@ -604,73 +604,70 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="certWrap">
-                <div className="certHeader">
-                  <div>
-                    <div className="certEyebrow">Certificate NFT</div>
-                    <div className="certName">
-                      {safeText(mintState.tokenMeta?.name) ||
-                        (mintState.tokenId ? `MIT Workshop Certificate #${mintState.tokenId}` : '—')}
+              {mintState.status === 'confirmed' ? (
+                <>
+                  <div className="certWrap">
+                    <div className="certHeader">
+                      <div>
+                        <div className="certEyebrow">Certificate NFT</div>
+                        <div className="certName">
+                          {safeText(mintState.tokenMeta?.name) ||
+                            (mintState.tokenId ? `MIT Workshop Certificate #${mintState.tokenId}` : '—')}
+                        </div>
+                        <div className="certDesc">
+                          {safeText(mintState.tokenMeta?.description) ||
+                            'Official on-chain participation certificate issued by Masterstroke Academy for the MST Blockchain Workshop.'}
+                        </div>
+                      </div>
+                      {mintState.txHash ? (
+                        <div className="txPill" title={mintState.txHash}>
+                          Tx: {shortAddr(mintState.txHash)}
+                        </div>
+                      ) : null}
                     </div>
-                    <div className="certDesc">
-                      {safeText(mintState.tokenMeta?.description) ||
-                        'Official on-chain participation certificate issued by Masterstroke Academy for the MST Blockchain Workshop.'}
+
+                    <div className="certPreview">
+                      {safeText(mintState.tokenMeta?.image) ? (
+                        <img
+                          className="certImg"
+                          src={ipfsToGateway(mintState.tokenMeta.image, pinataGateway)}
+                          alt={safeText(mintState.tokenMeta?.name) || 'Certificate NFT'}
+                        />
+                      ) : null}
                     </div>
                   </div>
-                  {mintState.txHash ? (
-                    <div className="txPill" title={mintState.txHash}>
-                      Tx: {shortAddr(mintState.txHash)}
-                    </div>
-                  ) : null}
-                </div>
 
-                <div className="certPreview">
-                  {safeText(mintState.tokenMeta?.image) ? (
-                    <img
-                      className="certImg"
-                      src={ipfsToGateway(mintState.tokenMeta.image, pinataGateway)}
-                      alt={safeText(mintState.tokenMeta?.name) || 'Certificate NFT'}
-                    />
-                  ) : (
-                    <div className="certEmpty">
-                      Mint your certificate to preview it here.
-                      <div className="certEmptyHint">
-                        (After minting we pin your personalized certificate image to IPFS.)
-                      </div>
+                  <div className="kv">
+                    <div className="k">IPFS</div>
+                    <div className="v vLinks">
+                      <a
+                        className={`linkBtn ${mintState.metadataGateway ? '' : 'disabled'}`}
+                        href={mintState.metadataGateway || undefined}
+                        target={mintState.metadataGateway ? '_blank' : undefined}
+                        rel={mintState.metadataGateway ? 'noreferrer' : undefined}
+                        aria-disabled={!mintState.metadataGateway}
+                        onClick={(e) => {
+                          if (!mintState.metadataGateway) e.preventDefault()
+                        }}
+                      >
+                        View Metadata
+                      </a>
+                      <a
+                        className={`linkBtn ${mintState.imageGateway ? '' : 'disabled'}`}
+                        href={mintState.imageGateway || undefined}
+                        target={mintState.imageGateway ? '_blank' : undefined}
+                        rel={mintState.imageGateway ? 'noreferrer' : undefined}
+                        aria-disabled={!mintState.imageGateway}
+                        onClick={(e) => {
+                          if (!mintState.imageGateway) e.preventDefault()
+                        }}
+                      >
+                        View Certificate Image
+                      </a>
                     </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="kv">
-                <div className="k">IPFS</div>
-                <div className="v vLinks">
-                  <a
-                    className={`linkBtn ${mintState.metadataGateway ? '' : 'disabled'}`}
-                    href={mintState.metadataGateway || undefined}
-                    target={mintState.metadataGateway ? '_blank' : undefined}
-                    rel={mintState.metadataGateway ? 'noreferrer' : undefined}
-                    aria-disabled={!mintState.metadataGateway}
-                    onClick={(e) => {
-                      if (!mintState.metadataGateway) e.preventDefault()
-                    }}
-                  >
-                    View Metadata
-                  </a>
-                  <a
-                    className={`linkBtn ${mintState.imageGateway ? '' : 'disabled'}`}
-                    href={mintState.imageGateway || undefined}
-                    target={mintState.imageGateway ? '_blank' : undefined}
-                    rel={mintState.imageGateway ? 'noreferrer' : undefined}
-                    aria-disabled={!mintState.imageGateway}
-                    onClick={(e) => {
-                      if (!mintState.imageGateway) e.preventDefault()
-                    }}
-                  >
-                    View Certificate Image
-                  </a>
-                </div>
-              </div>
+                  </div>
+                </>
+              ) : null}
             </div>
           </section>
         </main>
