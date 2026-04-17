@@ -18,6 +18,9 @@ dist-ssr
 # Vite cache
 .vite
 
+# Lockfiles (keep these tracked)
+!package-lock.json
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
