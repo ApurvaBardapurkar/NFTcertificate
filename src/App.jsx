@@ -7,8 +7,52 @@ const CONTRACT_ABI = [
   'function tokenURI(uint256 tokenId) view returns (string)',
   'function hasMinted(address) view returns (bool)',
   'function totalSupply() view returns (uint256)',
+  'function MAX_SUPPLY() view returns (uint256)',
   'event CertificateMinted(uint256 indexed tokenId,address indexed recipient,string studentName,string mobileNumber,string branch,string tokenURI)',
 ]
+
+function collectErrorCodesAndMessages(err, depth = 0) {
+  if (!err || depth > 8) return { codes: [], text: '' }
+  const codes = []
+  if (err.code !== undefined && err.code !== null) codes.push(err.code)
+  const text = `${err.shortMessage || ''} ${err.message || ''} ${err.reason || ''}`
+  const inner = collectErrorCodesAndMessages(err.error || err.cause, depth + 1)
+  return {
+    codes: [...codes, ...inner.codes],
+    text: `${text} ${inner.text}`,
+  }
+}
+
+function isMetaMaskInternalRpcError(err) {
+  const { codes, text } = collectErrorCodesAndMessages(err)
+  const t = text.toLowerCase()
+  if (t.includes('internal json-rpc')) return true
+  if (codes.includes(-32603)) return true
+  if (t.includes('-32603')) return true
+  return false
+}
+
+function formatMintRpcError(err) {
+  if (isMetaMaskInternalRpcError(err)) {
+    return (
+      'MetaMask hit an Internal JSON-RPC error (-32603) from the MST testnet endpoint. That usually means the RPC ' +
+      'failed during gas estimation or returned a broken response — it does not mean the 50-certificate cap was reached. ' +
+      'This app sends a fixed gas limit for mint to avoid bad estimation. If it still fails: in MetaMask open the MST Testnet ' +
+      'network settings and set the RPC URL to exactly the value in your .env as VITE_RPC_URL, save, then retry.'
+    )
+  }
+
+  const msg = `${err?.shortMessage || ''} ${err?.message || ''} ${err?.reason || ''}`.trim()
+  if (msg.includes('missing revert data') || err?.code === 'CALL_EXCEPTION') {
+    return (
+      'The node did not return a revert reason. That often happens on limited RPCs even when the real issue is elsewhere. ' +
+      'If this wallet already minted one certificate, use a different address. Otherwise confirm MetaMask is on MST Testnet ' +
+      'and matches your project RPC (VITE_RPC_URL), then retry.'
+    )
+  }
+
+  return err?.shortMessage || err?.message || err?.reason || 'Mint failed'
+}
 
 function normalizeExplorerBase(url) {
   if (!url) return ''
@@ -65,7 +109,7 @@ function drawCertificate({ canvas, templateImg, studentName }) {
   ctx.textBaseline = 'middle'
 
   while (fontSize > 24) {
-    ctx.font = `700 ${fontSize}px "Georgia", "Times New Roman", serif`
+    ctx.font = `900 ${fontSize}px "Georgia", "Times New Roman", serif`
     const w = ctx.measureText(name).width
     if (w <= maxTextWidth) break
     fontSize -= 2
@@ -133,9 +177,23 @@ export default function App() {
   )
   const contractAddress = import.meta.env.VITE_CONTRACT_ADDRESS
   const chainName = import.meta.env.VITE_CHAIN_NAME || 'MST Testnet'
-  // Use 5175 by default; 5174 is often taken by Vite when 5173 is busy
-  const ipfsApiBase = import.meta.env.VITE_IPFS_BACKEND || 'http://localhost:5175'
+  // Dev: leave VITE_IPFS_BACKEND unset → same-origin `/api` (Vite proxies to Express on PORT).
+  // Prod: set VITE_IPFS_BACKEND to your public API origin (no trailing slash).
+  const ipfsApiBase = (import.meta.env.VITE_IPFS_BACKEND || '').trim().replace(/\/$/, '')
+  const apiUrl = (path) => {
+    const p = path.startsWith('/') ? path : `/${path}`
+    return ipfsApiBase ? `${ipfsApiBase}${p}` : p
+  }
   const pinataGateway = import.meta.env.VITE_PINATA_GATEWAY || 'https://gateway.pinata.cloud/ipfs/'
+  const mintGasLimit = (() => {
+    const raw = String(import.meta.env.VITE_MINT_GAS_LIMIT || '550000').replace(/\s+/g, '') || '550000'
+    try {
+      const n = BigInt(raw)
+      return n > 0n ? n : 550000n
+    } catch {
+      return 550000n
+    }
+  })()
 
   const templateImgRef = useRef(null)
   const canvasRef = useRef(null)
@@ -166,6 +224,8 @@ export default function App() {
   })
 
   const [stats, setStats] = useState({ totalSupply: '', hasMinted: '' })
+  const [templateReady, setTemplateReady] = useState(false)
+  const [mintPhase, setMintPhase] = useState('') // '' | ipfs-image | ipfs-meta | wallet
 
   const canUseMetaMask = typeof window !== 'undefined' && !!window.ethereum
 
@@ -229,6 +289,7 @@ export default function App() {
 
   async function mintCertificate(e) {
     e?.preventDefault?.()
+    setMintPhase('')
     setMintState({
       status: 'signing',
       txHash: '',
@@ -250,18 +311,57 @@ export default function App() {
 
       await ensureMstNetwork(window.ethereum)
 
-      // 1) Render certificate image (name in gold) and upload to IPFS via backend
+      const provider = new ethers.BrowserProvider(window.ethereum)
+      const signer = await provider.getSigner()
+      const cRead = new ethers.Contract(contractAddress, CONTRACT_ABI, provider)
+      const userAddr = await signer.getAddress()
+      const [already, supply, maxSupply] = await Promise.all([
+        cRead.hasMinted(userAddr),
+        cRead.totalSupply(),
+        cRead.MAX_SUPPLY(),
+      ])
+      if (already) {
+        throw new Error(
+          'This wallet already minted a certificate. Each address can mint only once. Use a different wallet to mint again.',
+        )
+      }
+      if (supply >= maxSupply) {
+        throw new Error('All certificate NFTs have been minted (supply cap reached).')
+      }
+
+      // 1) Render certificate image (bold name in gold), then IPFS — only after on-chain check
       const templateImg = templateImgRef.current
       const canvas = canvasRef.current
       if (!templateImg || !canvas) throw new Error('Certificate template not ready.')
+      await new Promise((resolve, reject) => {
+        if (templateImg.complete && templateImg.naturalWidth > 0) {
+          resolve()
+          return
+        }
+        const onLoad = () => {
+          templateImg.removeEventListener('load', onLoad)
+          templateImg.removeEventListener('error', onErr)
+          resolve()
+        }
+        const onErr = () => {
+          templateImg.removeEventListener('load', onLoad)
+          templateImg.removeEventListener('error', onErr)
+          reject(new Error('Certificate template image failed to load.'))
+        }
+        templateImg.addEventListener('load', onLoad)
+        templateImg.addEventListener('error', onErr)
+      })
+      if (!templateImg.naturalWidth) throw new Error('Certificate template image not loaded.')
+
       drawCertificate({ canvas, templateImg, studentName: form.studentName.trim() })
 
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png', 0.95))
       if (!blob) throw new Error('Failed to generate certificate image.')
 
+      setMintPhase('ipfs-image')
       const imgForm = new FormData()
       imgForm.append('file', blob, 'certificate.png')
-      const imgRes = await fetch(`${ipfsApiBase}/api/ipfs/certificate`, {
+      const imgRes = await fetch(apiUrl('/api/ipfs/certificate'), {
         method: 'POST',
         body: imgForm,
       })
@@ -287,7 +387,8 @@ export default function App() {
         ],
       }
 
-      const metaRes = await fetch(`${ipfsApiBase}/api/ipfs/metadata`, {
+      setMintPhase('ipfs-meta')
+      const metaRes = await fetch(apiUrl('/api/ipfs/metadata'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(metaBody),
@@ -298,8 +399,34 @@ export default function App() {
       }
       const metaJson = await metaRes.json()
 
-      const provider = new ethers.BrowserProvider(window.ethereum)
-      const signer = await provider.getSigner()
+      setMintPhase('wallet')
+      let prepRes
+      try {
+        prepRes = await fetch(apiUrl('/api/chain/prepare-mint'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contractAddress,
+            from: userAddr,
+            studentName: form.studentName.trim(),
+            mobileNumber: form.mobileNumber.trim(),
+            branch: form.branch.trim(),
+            tokenURI: metaJson.ipfsUri,
+          }),
+        })
+      } catch {
+        throw new Error(
+          'Cannot reach the backend that simulates your mint. Run `npm run dev:server` in another terminal (same folder) so /api/chain/prepare-mint can use VITE_RPC_URL.',
+        )
+      }
+      const prep = await prepRes.json().catch(() => ({}))
+      if (!prepRes.ok || prep.ok === false) {
+        throw new Error(prep.reason || prep.error || `Mint pre-check failed (${prepRes.status})`)
+      }
+      const serverGas = BigInt(String(prep.gasLimit || '0'))
+      const gasLimit =
+        serverGas > 0n ? (serverGas > mintGasLimit ? serverGas : mintGasLimit) : mintGasLimit
+
       const c = new ethers.Contract(contractAddress, CONTRACT_ABI, signer)
 
       const tx = await c.mintWorkshopCertificate(
@@ -307,10 +434,17 @@ export default function App() {
         form.mobileNumber.trim(),
         form.branch.trim(),
         metaJson.ipfsUri,
+        { gasLimit },
       )
 
       setMintState((m) => ({ ...m, status: 'pending', txHash: tx.hash }))
       const receipt = await tx.wait()
+      if (receipt && Number(receipt.status) === 0) {
+        const h = receipt.hash || tx.hash
+        throw new Error(
+          `Transaction was mined but reverted (status=0). Open MSTScan for the tx hash: ${h}. If you just saw a clear error from the pre-check, the chain state may have changed—retry once.`,
+        )
+      }
 
       let tokenId = ''
       try {
@@ -357,11 +491,13 @@ export default function App() {
         error: '',
       }))
       await refreshStats()
+      setMintPhase('')
     } catch (err) {
+      setMintPhase('')
       setMintState((m) => ({
         ...m,
         status: 'error',
-        error: err?.shortMessage || err?.message || 'Mint failed',
+        error: formatMintRpcError(err),
       }))
     }
   }
@@ -502,15 +638,25 @@ export default function App() {
                     !canUseMetaMask ||
                     !contractAddress ||
                     wallet.status !== 'connected' ||
+                    stats.hasMinted === 'Yes' ||
+                    !templateReady ||
                     mintState.status === 'signing' ||
                     mintState.status === 'pending'
                   }
                 >
                   {mintState.status === 'signing'
-                    ? 'Confirm in MetaMask…'
+                    ? mintPhase === 'ipfs-image'
+                      ? 'Uploading certificate to IPFS…'
+                      : mintPhase === 'ipfs-meta'
+                        ? 'Uploading metadata to IPFS…'
+                        : mintPhase === 'wallet'
+                          ? 'Confirm in MetaMask…'
+                          : 'Preparing…'
                     : mintState.status === 'pending'
                       ? 'Minting…'
-                      : 'Mint Certificate'}
+                      : stats.hasMinted === 'Yes'
+                        ? 'Already minted'
+                        : 'Mint Certificate'}
                 </button>
                 <div className="miniInfo">
                   <div>
@@ -523,6 +669,13 @@ export default function App() {
                   </div>
                 </div>
               </div>
+
+              {stats.hasMinted === 'Yes' ? (
+                <div className="alert warn">
+                  This wallet already holds a certificate NFT. The contract allows one mint per address — connect a
+                  different wallet to mint again.
+                </div>
+              ) : null}
 
               {mintState.status === 'confirmed' ? (
                 <div className="alert success">
@@ -679,7 +832,7 @@ export default function App() {
           alt=""
           className="hiddenAsset"
           onLoad={() => {
-            // template ready; nothing to render until mint
+            setTemplateReady(true)
           }}
         />
         <canvas ref={canvasRef} className="hiddenAsset" />

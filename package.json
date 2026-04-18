@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "kill-ports": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/kill-dev-ports.ps1",
+    "dev:all": "concurrently -k -n server,web -c blue,green \"npm run dev:server\" \"npm run dev\"",
     "dev:server": "node server/index.js",
     "build": "vite build",
     "lint": "eslint .",
@@ -24,6 +26,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
     "eslint": "^9.39.4",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",
@@ -31,4 +34,3 @@
     "vite": "^8.0.4"
   }
 }
-
