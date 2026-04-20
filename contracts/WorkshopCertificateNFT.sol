@@ -11,7 +11,7 @@ pragma solidity ^0.8.20;
 import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v4.9.6/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 
 contract WorkshopCertificateNFT is ERC721URIStorage {
-    uint256 public constant MAX_SUPPLY = 50;
+    uint256 public constant MAX_SUPPLY = 40;
     uint256 private _tokenIdCounter;
 
     string public constant EVENT_NAME = "MST Blockchain Workshop";

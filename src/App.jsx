@@ -171,6 +171,7 @@ async function ensureMstNetwork(ethereum) {
 }
 
 export default function App() {
+  console.log("window.ethereum:", window.ethereum);
   const explorerBase = useMemo(
     () => normalizeExplorerBase(import.meta.env.VITE_BLOCK_EXPLORER),
     [],
