@@ -11,14 +11,11 @@ pragma solidity ^0.8.20;
 import "https://github.com/OpenZeppelin/openzeppelin-contracts/blob/v4.9.6/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 
 contract WorkshopCertificateNFT is ERC721URIStorage {
-    uint256 public constant MAX_SUPPLY = 40;
+    uint256 public constant MAX_SUPPLY_PER_EVENT = 1000000;
     uint256 private _tokenIdCounter;
 
-    string public constant EVENT_NAME = "MST Blockchain Workshop";
-    string public constant EVENT_PLACE = "MIT College of Engineering, Alandi";
-    string public constant ISSUING_AUTHORITY = "Masterstroke Academy";
-
     struct StudentData {
+        uint256 eventId;
         string studentName;
         string mobileNumber;
         string branch;
@@ -26,42 +23,52 @@ contract WorkshopCertificateNFT is ERC721URIStorage {
     }
 
     mapping(uint256 => StudentData) public certificateData;
-    mapping(address => bool) public hasMinted;
+    mapping(uint256 => uint256) public mintedForEvent; // eventId => minted count
+    mapping(uint256 => mapping(address => bool)) public hasMinted; // eventId => address => minted?
 
     event CertificateMinted(
         uint256 indexed tokenId,
         address indexed recipient,
+        uint256 indexed eventId,
         string studentName,
         string mobileNumber,
         string branch,
         string tokenURI
     );
 
-    constructor() ERC721("MIT Alandi Workshop Certificate", "MITWC") {}
+    constructor() ERC721("Workshop Certificate", "WCCERT") {}
 
     function totalSupply() public view returns (uint256) {
         return _tokenIdCounter;
     }
 
+    function totalSupplyForEvent(uint256 eventId) public view returns (uint256) {
+        return mintedForEvent[eventId];
+    }
+
     function mintWorkshopCertificate(
+        uint256 eventId,
         string calldata studentName,
         string calldata mobileNumber,
         string calldata branch,
         string calldata tokenURI_
     ) external returns (uint256) {
         address recipient = msg.sender;
+        require(eventId > 0, "Event required");
         require(bytes(studentName).length > 0, "Student name required");
         require(bytes(mobileNumber).length > 0, "Mobile required");
         require(bytes(branch).length > 0, "Branch required");
         require(bytes(tokenURI_).length > 0, "Token URI required");
-        require(_tokenIdCounter < MAX_SUPPLY, "All giveaway NFTs minted");
-        require(!hasMinted[recipient], "Already minted");
+        require(mintedForEvent[eventId] < MAX_SUPPLY_PER_EVENT, "All event NFTs minted");
+        require(!hasMinted[eventId][recipient], "Already minted for event");
 
         uint256 newTokenId = ++_tokenIdCounter;
         _safeMint(recipient, newTokenId);
-        hasMinted[recipient] = true;
+        hasMinted[eventId][recipient] = true;
+        mintedForEvent[eventId] = mintedForEvent[eventId] + 1;
 
         certificateData[newTokenId] = StudentData({
+            eventId: eventId,
             studentName: studentName,
             mobileNumber: mobileNumber,
             branch: branch,
@@ -70,7 +77,7 @@ contract WorkshopCertificateNFT is ERC721URIStorage {
 
         _setTokenURI(newTokenId, tokenURI_);
 
-        emit CertificateMinted(newTokenId, recipient, studentName, mobileNumber, branch, tokenURI_);
+        emit CertificateMinted(newTokenId, recipient, eventId, studentName, mobileNumber, branch, tokenURI_);
         return newTokenId;
     }
 }

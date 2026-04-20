@@ -3,13 +3,52 @@ import { ethers } from 'ethers'
 import './App.css'
 
 const CONTRACT_ABI = [
-  'function mintWorkshopCertificate(string studentName,string mobileNumber,string branch,string tokenURI) external returns (uint256)',
+  'function mintWorkshopCertificate(uint256 eventId,string studentName,string mobileNumber,string branch,string tokenURI) external returns (uint256)',
   'function tokenURI(uint256 tokenId) view returns (string)',
-  'function hasMinted(address) view returns (bool)',
+  'function hasMinted(uint256 eventId,address) view returns (bool)',
   'function totalSupply() view returns (uint256)',
-  'function MAX_SUPPLY() view returns (uint256)',
-  'event CertificateMinted(uint256 indexed tokenId,address indexed recipient,string studentName,string mobileNumber,string branch,string tokenURI)',
+  'function totalSupplyForEvent(uint256 eventId) view returns (uint256)',
+  'function MAX_SUPPLY_PER_EVENT() view returns (uint256)',
+  'event CertificateMinted(uint256 indexed tokenId,address indexed recipient,uint256 indexed eventId,string studentName,string mobileNumber,string branch,string tokenURI)',
 ]
+
+const COLLEGES = {
+  // Using one contract per college: keep eventId constant (1) inside each contract.
+  mit: {
+    label: 'MIT-ADT University, Pune',
+    eventId: 1,
+    template: '/certificates/mit.png',
+    layout: { nameY: 0.468, fontScale: 0.062, maxWidth: 0.76, color: '#B88A2A' },
+  },
+  vidyashilp: {
+    label: 'Vidyashilp University, Bangalore',
+    eventId: 1,
+    template: '/certificates/vidyashilp.png',
+    layout: { nameY: 0.468, fontScale: 0.062, maxWidth: 0.76, color: '#B88A2A' },
+  },
+  reva: {
+    label: 'Reva University, Bangalore',
+    eventId: 1,
+    template: '/certificates/reva.png',
+    layout: { nameY: 0.468, fontScale: 0.062, maxWidth: 0.76, color: '#B88A2A' },
+  },
+  jain: {
+    label: 'Jain University, Bangalore',
+    eventId: 1,
+    template: '/certificates/jain.png',
+    layout: { nameY: 0.468, fontScale: 0.062, maxWidth: 0.76, color: '#B88A2A' },
+  },
+  bms: {
+    label: 'B.M.S. College of Engineering, Bangalore',
+    eventId: 1,
+    template: '/certificates/bms.png',
+    layout: { nameY: 0.468, fontScale: 0.062, maxWidth: 0.76, color: '#B88A2A' },
+  },
+}
+
+function getCollege(key) {
+  return COLLEGES[key] || null
+}
 
 function collectErrorCodesAndMessages(err, depth = 0) {
   if (!err || depth > 8) return { codes: [], text: '' }
@@ -37,7 +76,7 @@ function formatMintRpcError(err) {
     return (
       'MetaMask hit an Internal JSON-RPC error (-32603) from the MST testnet endpoint. That usually means the RPC ' +
       'failed during gas estimation or returned a broken response — it does not mean the 50-certificate cap was reached. ' +
-      'This app sends a fixed gas limit for mint to avoid bad estimation. If it still fails: in MetaMask open the MST Testnet ' +
+      'This app sends a fixed gas limit and gas price to avoid broken estimation. If it still fails: in MetaMask open the MST Testnet ' +
       'network settings and set the RPC URL to exactly the value in your .env as VITE_RPC_URL, save, then retry.'
     )
   }
@@ -45,9 +84,9 @@ function formatMintRpcError(err) {
   const msg = `${err?.shortMessage || ''} ${err?.message || ''} ${err?.reason || ''}`.trim()
   if (msg.includes('missing revert data') || err?.code === 'CALL_EXCEPTION') {
     return (
-      'The node did not return a revert reason. That often happens on limited RPCs even when the real issue is elsewhere. ' +
-      'If this wallet already minted one certificate, use a different address. Otherwise confirm MetaMask is on MST Testnet ' +
-      'and matches your project RPC (VITE_RPC_URL), then retry.'
+      'The RPC did not return a revert reason. On MST Testnet this is usually an RPC limitation (not a real contract error), ' +
+      'especially when MetaMask uses a different/broken RPC URL. Ensure MetaMask is on MST Testnet and its RPC URL matches ' +
+      'your VITE_RPC_URL, then retry.'
     )
   }
 
@@ -78,7 +117,7 @@ function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n))
 }
 
-function drawCertificate({ canvas, templateImg, studentName }) {
+function drawCertificate({ canvas, templateImg, studentName, layout }) {
   const ctx = canvas.getContext('2d')
   if (!ctx || !templateImg?.naturalWidth) return
 
@@ -91,19 +130,18 @@ function drawCertificate({ canvas, templateImg, studentName }) {
   const name = (studentName || '').trim()
   if (!name) return
 
-  // Position: centered under "This Certificate is Proudly Presented to:"
-  // Tuned to this template (1024x768).
   const x = canvas.width * 0.5
-  const y = canvas.height * 0.435
-  const maxTextWidth = canvas.width * 0.72
+  // Position between "Presented to:" and the horizontal line (default tuned for templates in /public/certificates).
+  const y = canvas.height * (layout?.nameY ?? 0.468)
+  const maxTextWidth = canvas.width * (layout?.maxWidth ?? 0.76)
 
-  // Gold-ish color matching the certificate headline
-  const gold = '#B88A2A'
-  const shadow = 'rgba(0,0,0,0.25)'
+  // Golden name as requested
+  const gold = layout?.color || '#B88A2A'
+  const shadow = 'rgba(0,0,0,0.22)'
 
   // Auto-fit font size for long names
-  let fontSize = Math.round(canvas.width * 0.055) // ~56 at 1024w (bigger as requested)
-  fontSize = clamp(fontSize, 34, 72)
+  let fontSize = Math.round(canvas.width * (layout?.fontScale ?? 0.062))
+  fontSize = clamp(fontSize, 34, 80)
 
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
@@ -121,8 +159,8 @@ function drawCertificate({ canvas, templateImg, studentName }) {
   ctx.shadowOffsetY = 2
 
   // subtle stroke for clarity
-  ctx.lineWidth = 4
-  ctx.strokeStyle = 'rgba(255,255,255,0.2)'
+  ctx.lineWidth = Math.max(3, Math.round(canvas.width * 0.003))
+  ctx.strokeStyle = 'rgba(0,0,0,0.18)'
   ctx.strokeText(name, x, y)
 
   ctx.fillStyle = gold
@@ -135,52 +173,55 @@ function drawCertificate({ canvas, templateImg, studentName }) {
   ctx.shadowOffsetY = 0
 }
 
-async function ensureMstNetwork(ethereum) {
-  const chainIdDec = Number(import.meta.env.VITE_CHAIN_ID)
-  const chainIdHex = `0x${chainIdDec.toString(16)}`
-
-  try {
-    await ethereum.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: chainIdHex }],
-    })
-    return
-  } catch (err) {
-    // 4902 = unknown chain
-    if (err?.code !== 4902) throw err
-  }
-
-  const rpcUrl = import.meta.env.VITE_RPC_URL
+async function requireMstNetwork(ethereum) {
+  const requiredChainIdDec = Number(import.meta.env.VITE_CHAIN_ID)
+  const requiredChainIdHex = `0x${requiredChainIdDec.toString(16)}`
   const chainName = import.meta.env.VITE_CHAIN_NAME || 'MST Testnet'
-  const nativeName = import.meta.env.VITE_NATIVE_NAME || 'MST'
-  const nativeSymbol = import.meta.env.VITE_NATIVE_SYMBOL || 'MST'
-  const explorerBase = normalizeExplorerBase(import.meta.env.VITE_BLOCK_EXPLORER)
 
-  await ethereum.request({
-    method: 'wallet_addEthereumChain',
-    params: [
-      {
-        chainId: chainIdHex,
-        chainName,
-        nativeCurrency: { name: nativeName, symbol: nativeSymbol, decimals: 18 },
-        rpcUrls: [rpcUrl],
-        blockExplorerUrls: explorerBase ? [explorerBase] : [],
-      },
-    ],
-  })
+  const currentChainId = await ethereum.request({ method: 'eth_chainId' })
+  if (String(currentChainId).toLowerCase() !== String(requiredChainIdHex).toLowerCase()) {
+    throw new Error(`Please switch your wallet network to ${chainName} and try again.`)
+  }
+}
+
+function getReadProvider() {
+  const rpc = (import.meta.env.VITE_RPC_URL || '').trim()
+  const chainIdRaw = import.meta.env.VITE_CHAIN_ID
+  const chainId =
+    chainIdRaw === undefined || chainIdRaw === null || String(chainIdRaw).trim() === ''
+      ? undefined
+      : Number(chainIdRaw)
+  if (!rpc) return null
+  return chainId !== undefined && Number.isFinite(chainId)
+    ? new ethers.JsonRpcProvider(rpc, chainId)
+    : new ethers.JsonRpcProvider(rpc)
+}
+
+async function getFeeOverrides(provider) {
+  try {
+    const fee = await provider.getFeeData()
+    // Prefer EIP-1559 when supported by the chain
+    if (fee?.maxFeePerGas && fee?.maxPriorityFeePerGas) {
+      return {
+        maxFeePerGas: fee.maxFeePerGas,
+        maxPriorityFeePerGas: fee.maxPriorityFeePerGas,
+      }
+    }
+    if (fee?.gasPrice) return { gasPrice: fee.gasPrice }
+    return {}
+  } catch {
+    return {}
+  }
 }
 
 export default function App() {
-  console.log("window.ethereum:", window.ethereum);
   const explorerBase = useMemo(
     () => normalizeExplorerBase(import.meta.env.VITE_BLOCK_EXPLORER),
     [],
   )
-  const contractAddress = import.meta.env.VITE_CONTRACT_ADDRESS
-  const chainName = import.meta.env.VITE_CHAIN_NAME || 'MST Testnet'
   // Dev: leave VITE_IPFS_BACKEND unset → same-origin `/api` (Vite proxies to Express on PORT).
   // Prod: set VITE_IPFS_BACKEND to your public API origin (no trailing slash).
-  const ipfsApiBase = ('https://nft-backend-mst.vercel.app/').trim().replace(/\/$/, '')
+  const ipfsApiBase = (import.meta.env.VITE_IPFS_BACKEND || '').trim().replace(/\/$/, '')
   const apiUrl = (path) => {
     const p = path.startsWith('/') ? path : `/${path}`
     return ipfsApiBase ? `${ipfsApiBase}${p}` : p
@@ -199,6 +240,15 @@ export default function App() {
   const templateImgRef = useRef(null)
   const canvasRef = useRef(null)
 
+  const [selectedCollege, setSelectedCollege] = useState('mit')
+  const college = useMemo(() => getCollege(selectedCollege), [selectedCollege])
+  const contractAddress = useMemo(() => {
+    const base = (import.meta.env.VITE_CONTRACT_ADDRESS || '').trim()
+    const byCollegeKey = `VITE_CONTRACT_ADDRESS_${String(selectedCollege || '').toUpperCase()}`
+    const override = (import.meta.env[byCollegeKey] || '').trim()
+    return override || base
+  }, [selectedCollege])
+
   const [wallet, setWallet] = useState({
     status: 'idle', // idle | connecting | connected | error
     address: '',
@@ -210,6 +260,7 @@ export default function App() {
     studentName: '',
     mobileNumber: '',
     branch: '',
+    college: 'mit',
   })
 
   const [mintState, setMintState] = useState({
@@ -224,7 +275,7 @@ export default function App() {
     error: '',
   })
 
-  const [stats, setStats] = useState({ totalSupply: '', hasMinted: '' })
+  const [stats, setStats] = useState({ totalSupply: '', hasMinted: '', maxSupply: '' })
   const [templateReady, setTemplateReady] = useState(false)
   const [mintPhase, setMintPhase] = useState('') // '' | ipfs-image | ipfs-meta | wallet
 
@@ -241,17 +292,32 @@ export default function App() {
     return { tx, contract, token }
   }, [explorerBase, mintState.txHash, mintState.tokenId, contractAddress])
 
-  async function refreshStats(addressOverride) {
-    if (!canUseMetaMask || !contractAddress) return
+  async function refreshStats(addressOverride, eventIdOverride) {
+    if (!contractAddress) return
     try {
-      const provider = new ethers.BrowserProvider(window.ethereum)
+      const eventId = BigInt(eventIdOverride ?? college?.eventId ?? 0)
+      if (!eventId) return
+      const provider = getReadProvider()
+      if (!provider) return
+
+      const code = await provider.getCode(contractAddress)
+      if (!code || code === '0x') {
+        setStats({ totalSupply: '', hasMinted: '', maxSupply: '' })
+        return
+      }
+
       const c = new ethers.Contract(contractAddress, CONTRACT_ABI, provider)
-      const [supply, addr] = await Promise.all([
-        c.totalSupply(),
-        addressOverride || provider.getSigner().then((s) => s.getAddress()),
+      const addr = addressOverride || wallet.address || ''
+      const [supply, maxSupply, minted] = await Promise.all([
+        c.totalSupplyForEvent(eventId),
+        c.MAX_SUPPLY_PER_EVENT(),
+        addr ? c.hasMinted(eventId, addr) : Promise.resolve(false),
       ])
-      const minted = await c.hasMinted(addr)
-      setStats({ totalSupply: supply.toString(), hasMinted: minted ? 'Yes' : 'No' })
+      setStats({
+        totalSupply: supply.toString(),
+        maxSupply: maxSupply.toString(),
+        hasMinted: addr ? (minted ? 'Yes' : 'No') : '',
+      })
     } catch {
       // ignore (stats are optional)
     }
@@ -266,7 +332,6 @@ export default function App() {
         throw new Error('MetaMask not detected. Please install the MetaMask extension.')
       }
 
-      await ensureMstNetwork(window.ethereum)
       const provider = new ethers.BrowserProvider(window.ethereum)
       const accounts = await provider.send('eth_requestAccounts', [])
       const network = await provider.getNetwork()
@@ -287,6 +352,13 @@ export default function App() {
       }))
     }
   }
+
+  const isFormValid =
+    !!form.studentName.trim() &&
+    !!form.mobileNumber.trim() &&
+    !!form.branch.trim() &&
+    !!form.college &&
+    !!getCollege(form.college)
 
   async function mintCertificate(e) {
     e?.preventDefault?.()
@@ -309,25 +381,50 @@ export default function App() {
       if (!form.studentName.trim()) throw new Error('Please enter your name.')
       if (!form.mobileNumber.trim()) throw new Error('Please enter your mobile number.')
       if (!form.branch.trim()) throw new Error('Please enter your branch.')
+      if (!form.college || !getCollege(form.college)) throw new Error('Please select your college.')
 
-      await ensureMstNetwork(window.ethereum)
+      await requireMstNetwork(window.ethereum)
+
+      const selected = getCollege(form.college)
+      const eventId = BigInt(selected?.eventId ?? 0)
+      if (!eventId) throw new Error('Invalid college selection.')
 
       const provider = new ethers.BrowserProvider(window.ethereum)
       const signer = await provider.getSigner()
-      const cRead = new ethers.Contract(contractAddress, CONTRACT_ABI, provider)
       const userAddr = await signer.getAddress()
-      const [already, supply, maxSupply] = await Promise.all([
-        cRead.hasMinted(userAddr),
-        cRead.totalSupply(),
-        cRead.MAX_SUPPLY(),
-      ])
+
+      const readProvider = getReadProvider()
+      if (!readProvider) throw new Error('Missing VITE_RPC_URL in .env')
+      const code = await readProvider.getCode(contractAddress)
+      if (!code || code === '0x') {
+        throw new Error(
+          'No contract deployed at VITE_CONTRACT_ADDRESS on MST Testnet RPC. Deploy the updated contract to MST Testnet and update VITE_CONTRACT_ADDRESS.',
+        )
+      }
+      const cRead = new ethers.Contract(contractAddress, CONTRACT_ABI, readProvider)
+
+      let already, supply, maxSupply
+      try {
+        ;[already, supply, maxSupply] = await Promise.all([
+          cRead.hasMinted(eventId, userAddr),
+          cRead.totalSupplyForEvent(eventId),
+          cRead.MAX_SUPPLY_PER_EVENT(),
+        ])
+      } catch (readErr) {
+        // Most common cause: VITE_CONTRACT_ADDRESS still points to an older deployment (ABI mismatch).
+        const chainName = import.meta.env.VITE_CHAIN_NAME || 'MST Testnet'
+        throw new Error(
+          `Contract read failed on ${chainName}. Your VITE_CONTRACT_ADDRESS likely points to an older contract deployment. ` +
+            `Redeploy the updated contract (with per-college eventId support) and update VITE_CONTRACT_ADDRESS, then reload.`,
+        )
+      }
       if (already) {
         throw new Error(
-          'This wallet already minted a certificate. Each address can mint only once. Use a different wallet to mint again.',
+          'This wallet already minted a certificate for this college. Each address can mint only once per event. Use a different wallet to mint again.',
         )
       }
       if (supply >= maxSupply) {
-        throw new Error('All certificate NFTs have been minted (supply cap reached).')
+        throw new Error('All certificate NFTs for this college have been minted (supply cap reached).')
       }
 
       // 1) Render certificate image (bold name in gold), then IPFS — only after on-chain check
@@ -354,7 +451,12 @@ export default function App() {
       })
       if (!templateImg.naturalWidth) throw new Error('Certificate template image not loaded.')
 
-      drawCertificate({ canvas, templateImg, studentName: form.studentName.trim() })
+      drawCertificate({
+        canvas,
+        templateImg,
+        studentName: form.studentName.trim(),
+        layout: selected?.layout,
+      })
 
       const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png', 0.95))
       if (!blob) throw new Error('Failed to generate certificate image.')
@@ -374,13 +476,14 @@ export default function App() {
 
       // 2) Build metadata and upload JSON to IPFS
       const metaBody = {
-        name: `MIT Workshop Certificate #${(stats.totalSupply ? Number(stats.totalSupply) + 1 : '') || ''}`.trim(),
+        name: `${selected.label} Workshop Certificate #${(stats.totalSupply ? Number(stats.totalSupply) + 1 : '') || ''}`.trim(),
         description:
           'Official on-chain participation certificate issued by Masterstroke Academy for the MST Blockchain Workshop.',
         image: imgJson.ipfsUri,
         attributes: [
+          { trait_type: 'Event ID', value: String(selected.eventId) },
           { trait_type: 'Event Name', value: 'MST Blockchain Workshop' },
-          { trait_type: 'Event Place', value: 'MIT College of Engineering, Alandi' },
+          { trait_type: 'College', value: selected.label },
           { trait_type: 'Student Name', value: form.studentName.trim() },
           { trait_type: 'Mobile Number', value: form.mobileNumber.trim() },
           { trait_type: 'Branch', value: form.branch.trim() },
@@ -409,6 +512,7 @@ export default function App() {
           body: JSON.stringify({
             contractAddress,
             from: userAddr,
+            eventId: selected.eventId,
             studentName: form.studentName.trim(),
             mobileNumber: form.mobileNumber.trim(),
             branch: form.branch.trim(),
@@ -428,15 +532,48 @@ export default function App() {
       const gasLimit =
         serverGas > 0n ? (serverGas > mintGasLimit ? serverGas : mintGasLimit) : mintGasLimit
 
+      // Send tx with explicit gas settings to avoid MetaMask's flaky estimateGas / fee logic on MST RPCs.
       const c = new ethers.Contract(contractAddress, CONTRACT_ABI, signer)
-
-      const tx = await c.mintWorkshopCertificate(
+      // Force full signature to avoid accidentally encoding the legacy 4-arg selector.
+      const data = c.interface.encodeFunctionData('mintWorkshopCertificate(uint256,string,string,string,string)', [
+        eventId,
         form.studentName.trim(),
         form.mobileNumber.trim(),
         form.branch.trim(),
         metaJson.ipfsUri,
-        { gasLimit },
-      )
+      ])
+      const selector = String(data || '').slice(0, 10)
+      // eslint-disable-next-line no-console
+      console.log('Mint calldata selector:', selector, 'eventId:', eventId.toString())
+      if (selector !== '0x3afd64be') {
+        throw new Error(
+          `App bug/cached build: mint selector is ${selector} but expected 0x3afd64be. Hard refresh the page and restart dev server.`,
+        )
+      }
+      const feeOverrides = await getFeeOverrides(readProvider)
+
+      // Extra safety: simulate the exact transaction on the canonical RPC so we get a real revert (if any)
+      try {
+        await readProvider.call({
+          from: userAddr,
+          to: contractAddress,
+          data,
+          gasLimit,
+          ...feeOverrides,
+        })
+      } catch (simErr) {
+        // Log full details for debugging
+        // eslint-disable-next-line no-console
+        console.error('Mint simulation failed:', simErr)
+        throw simErr
+      }
+
+      const tx = await signer.sendTransaction({
+        to: contractAddress,
+        data,
+        gasLimit,
+        ...feeOverrides,
+      })
 
       setMintState((m) => ({ ...m, status: 'pending', txHash: tx.hash }))
       const receipt = await tx.wait()
@@ -491,9 +628,11 @@ export default function App() {
         metadataGateway: metaJson.gatewayUrl,
         error: '',
       }))
-      await refreshStats()
+      await refreshStats(userAddr, selected.eventId)
       setMintPhase('')
     } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('Mint failed (full error):', err)
       setMintPhase('')
       setMintState((m) => ({
         ...m,
@@ -529,6 +668,15 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    setForm((f) => ({ ...f, college: selectedCollege }))
+    setTemplateReady(false)
+    if (wallet.status === 'connected' && wallet.address) {
+      refreshStats(wallet.address, college?.eventId)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCollege])
+
   return (
     <div className="page">
       <div className="shell">
@@ -563,29 +711,7 @@ export default function App() {
                   ? 'Connecting…'
                   : wallet.status === 'connected'
                     ? 'Reconnect'
-                    : 'Connect MetaMask'}
-              </button>
-              <button
-                className="btn ghost"
-                onClick={async () => {
-                  try {
-                    if (!canUseMetaMask) return
-                    setWallet((w) => ({ ...w, error: '' }))
-                    await ensureMstNetwork(window.ethereum)
-                    const provider = new ethers.BrowserProvider(window.ethereum)
-                    const network = await provider.getNetwork()
-                    setWallet((w) => ({ ...w, chainId: network?.chainId?.toString?.() || '' }))
-                  } catch (err) {
-                    setWallet((w) => ({
-                      ...w,
-                      status: 'error',
-                      error: err?.message || 'Failed to switch network',
-                    }))
-                  }
-                }}
-                disabled={!canUseMetaMask}
-              >
-                Switch to {chainName}
+                    : 'Connect Wallet'}
               </button>
             </div>
 
@@ -600,6 +726,22 @@ export default function App() {
 
             <form className="form" onSubmit={mintCertificate}>
               <label className="field">
+                <div className="fieldLabel">College</div>
+                <select
+                  className="input select"
+                  value={selectedCollege}
+                  onChange={(e) => setSelectedCollege(e.target.value)}
+                  required
+                >
+                  {Object.entries(COLLEGES).map(([key, c]) => (
+                    <option key={key} value={key}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="field">
                 <div className="fieldLabel">Name</div>
                 <input
                   className="input"
@@ -607,6 +749,7 @@ export default function App() {
                   onChange={(e) => setForm((f) => ({ ...f, studentName: e.target.value }))}
                   placeholder="Enter your full name"
                   autoComplete="name"
+                  required
                 />
               </label>
 
@@ -618,6 +761,7 @@ export default function App() {
                   onChange={(e) => setForm((f) => ({ ...f, mobileNumber: e.target.value }))}
                   placeholder="e.g. 98XXXXXXXX"
                   inputMode="numeric"
+                  required
                 />
               </label>
 
@@ -628,6 +772,7 @@ export default function App() {
                   value={form.branch}
                   onChange={(e) => setForm((f) => ({ ...f, branch: e.target.value }))}
                   placeholder="e.g. CSE / IT / E&TC"
+                  required
                 />
               </label>
 
@@ -641,6 +786,7 @@ export default function App() {
                     wallet.status !== 'connected' ||
                     stats.hasMinted === 'Yes' ||
                     !templateReady ||
+                    !isFormValid ||
                     mintState.status === 'signing' ||
                     mintState.status === 'pending'
                   }
@@ -659,22 +805,12 @@ export default function App() {
                         ? 'Already minted'
                         : 'Mint Certificate'}
                 </button>
-                <div className="miniInfo">
-                  <div>
-                    <div className="miniLabel">Supply</div>
-                    <div className="miniValue">{stats.totalSupply || '—'} / 50</div>
-                  </div>
-                  <div>
-                    <div className="miniLabel">Already minted</div>
-                    <div className="miniValue">{stats.hasMinted || '—'}</div>
-                  </div>
-                </div>
               </div>
 
               {stats.hasMinted === 'Yes' ? (
                 <div className="alert warn">
-                  This wallet already holds a certificate NFT. The contract allows one mint per address — connect a
-                  different wallet to mint again.
+                  This wallet already holds a certificate NFT for this college. The contract allows one mint per address
+                  per event — connect a different wallet to mint again.
                 </div>
               ) : null}
 
@@ -766,7 +902,7 @@ export default function App() {
                         <div className="certEyebrow">Certificate NFT</div>
                         <div className="certName">
                           {safeText(mintState.tokenMeta?.name) ||
-                            (mintState.tokenId ? `MIT Workshop Certificate #${mintState.tokenId}` : '—')}
+                            (mintState.tokenId ? `${college?.label || 'Workshop'} Certificate #${mintState.tokenId}` : '—')}
                         </div>
                         <div className="certDesc">
                           {safeText(mintState.tokenMeta?.description) ||
@@ -829,7 +965,7 @@ export default function App() {
         {/* Hidden image + hidden canvas (used during mint) */}
         <img
           ref={templateImgRef}
-          src="/certificate-template.jpg"
+          src={college?.template || ''}
           alt=""
           className="hiddenAsset"
           onLoad={() => {

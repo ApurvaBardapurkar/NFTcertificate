@@ -88,7 +88,7 @@ async function pinJsonToPinata({ name, description, image, attributes }) {
 }
 
 const MINT_ABI = [
-  'function mintWorkshopCertificate(string,string,string,string) external returns (uint256)',
+  'function mintWorkshopCertificate(uint256,string,string,string,string) external returns (uint256)',
 ]
 
 function extractRevertReason(err) {
@@ -118,9 +118,11 @@ app.post('/api/chain/prepare-mint', async (req, res) => {
       return res.status(500).json({ ok: false, reason: 'Missing VITE_RPC_URL (or MST_RPC_URL) in .env for server-side mint checks.' })
     }
 
-    const { contractAddress, from, studentName, mobileNumber, branch, tokenURI } = req.body || {}
-    if (!contractAddress || !from || !studentName || !mobileNumber || !branch || !tokenURI) {
-      return res.status(400).json({ ok: false, reason: 'Missing contractAddress/from/studentName/mobileNumber/branch/tokenURI' })
+    const { contractAddress, from, eventId, studentName, mobileNumber, branch, tokenURI } = req.body || {}
+    if (!contractAddress || !from || eventId === undefined || eventId === null || !studentName || !mobileNumber || !branch || !tokenURI) {
+      return res
+        .status(400)
+        .json({ ok: false, reason: 'Missing contractAddress/from/eventId/studentName/mobileNumber/branch/tokenURI' })
     }
 
     const chainId = getChainIdNumber()
@@ -140,6 +142,7 @@ app.post('/api/chain/prepare-mint', async (req, res) => {
 
     const contract = new ethers.Contract(addr, MINT_ABI, provider)
     const args = [
+      BigInt(eventId),
       String(studentName).trim(),
       String(mobileNumber).trim(),
       String(branch).trim(),
