@@ -181,7 +181,7 @@ async function requireMstNetwork(ethereum) {
   const currentChainId = await ethereum.request({ method: 'eth_chainId' })
   if (String(currentChainId).toLowerCase() !== String(requiredChainIdHex).toLowerCase()) {
     throw new Error(`Please switch your wallet network to ${chainName} and try again.`)
-  }
+  } 
 }
 
 function getReadProvider() {
@@ -221,9 +221,9 @@ export default function App() {
   )
   // Dev: leave VITE_IPFS_BACKEND unset → same-origin `/api` (Vite proxies to Express on PORT).
   // Prod: set VITE_IPFS_BACKEND to your public API origin (no trailing slash).
-  const ipfsApiBase = (import.meta.env.VITE_IPFS_BACKEND || '').trim().replace(/\/$/, '')
+  const ipfsApiBase = ('https://nft-backend-mst.vercel.app/').trim().replace(/\/$/, '')
   const apiUrl = (path) => {
-    const p = path.startsWith('/') ? path : `/${path}`
+    const p = path.startsWith('https://nft-backend-mst.vercel.app/') ? path : `/${path}`
     return ipfsApiBase ? `${ipfsApiBase}${p}` : p
   }
   const pinataGateway = import.meta.env.VITE_PINATA_GATEWAY || 'https://gateway.pinata.cloud/ipfs/'
