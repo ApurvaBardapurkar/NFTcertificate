@@ -223,7 +223,7 @@ export default function App() {
   // Prod: set VITE_IPFS_BACKEND to your public API origin (no trailing slash).
   const ipfsApiBase = ('https://nft-backend-mst.vercel.app/').trim().replace(/\/$/, '')
   const apiUrl = (path) => {
-    const p = path.startsWith('https://nft-backend-mst.vercel.app/') ? path : `/${path}`
+    const p = path.startsWith('https://nft-backend-mst.vercel.app') ? path : `/${path}`
     return ipfsApiBase ? `${ipfsApiBase}${p}` : p
   }
   const pinataGateway = import.meta.env.VITE_PINATA_GATEWAY || 'https://gateway.pinata.cloud/ipfs/'
