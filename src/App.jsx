@@ -3,45 +3,27 @@ import { ethers } from 'ethers'
 import './App.css'
 
 const CONTRACT_ABI = [
-  'function mintWorkshopCertificate(uint256 eventId,string studentName,string mobileNumber,string branch,string tokenURI) external returns (uint256)',
+  'function mintWorkshopCertificate(uint256 eventId,string studentName,string branch,string tokenURI) external returns (uint256)',
   'function tokenURI(uint256 tokenId) view returns (string)',
   'function hasMinted(uint256 eventId,address) view returns (bool)',
   'function totalSupply() view returns (uint256)',
   'function totalSupplyForEvent(uint256 eventId) view returns (uint256)',
   'function MAX_SUPPLY_PER_EVENT() view returns (uint256)',
-  'event CertificateMinted(uint256 indexed tokenId,address indexed recipient,uint256 indexed eventId,string studentName,string mobileNumber,string branch,string tokenURI)',
+  'event CertificateMinted(uint256 indexed tokenId,address indexed recipient,uint256 indexed eventId,string studentName,string branch,string tokenURI)',
 ]
 
 const COLLEGES = {
   // Using one contract per college: keep eventId constant (1) inside each contract.
-  mit: {
-    label: 'MIT-ADT University, Pune',
+  dypcoe: {
+    label: 'DY Patil College of Engineering, Akurdi',
     eventId: 1,
-    template: '/certificates/mit.png',
+    template: '/certificates/originals/dypcoe.jpeg',
     layout: { nameY: 0.468, fontScale: 0.062, maxWidth: 0.76, color: '#B88A2A' },
   },
-  vidyashilp: {
-    label: 'Vidyashilp University, Bangalore',
+  vidyavardhaka: {
+    label: 'Vidyavardhaka College of Engineering',
     eventId: 1,
-    template: '/certificates/vidyashilp.png',
-    layout: { nameY: 0.468, fontScale: 0.062, maxWidth: 0.76, color: '#B88A2A' },
-  },
-  reva: {
-    label: 'Reva University, Bangalore',
-    eventId: 1,
-    template: '/certificates/reva.png',
-    layout: { nameY: 0.468, fontScale: 0.062, maxWidth: 0.76, color: '#B88A2A' },
-  },
-  jain: {
-    label: 'Jain University, Bangalore',
-    eventId: 1,
-    template: '/certificates/jain.png',
-    layout: { nameY: 0.468, fontScale: 0.062, maxWidth: 0.76, color: '#B88A2A' },
-  },
-  bms: {
-    label: 'B.M.S. College of Engineering, Bangalore',
-    eventId: 1,
-    template: '/certificates/bms.png',
+    template: 'certificates/originals/vidyavardhaka.jpeg',
     layout: { nameY: 0.468, fontScale: 0.062, maxWidth: 0.76, color: '#B88A2A' },
   },
 }
@@ -221,10 +203,13 @@ export default function App() {
   )
   // Dev: leave VITE_IPFS_BACKEND unset → same-origin `/api` (Vite proxies to Express on PORT).
   // Prod: set VITE_IPFS_BACKEND to your public API origin (no trailing slash).
-  const ipfsApiBase = ('https://nft-backend-mst.vercel.app/').trim().replace(/\/$/, '')
+  const ipfsApiBase = (import.meta.env.VITE_IPFS_BACKEND || '').trim().replace(/\/$/, '')
   const apiUrl = (path) => {
-    const p = path.startsWith('https://nft-backend-mst.vercel.app') ? path : `${path}`
-    return ipfsApiBase ? `${ipfsApiBase}${p}` : p
+    const p = String(path || '')
+    if (!p) return ''
+    if (!ipfsApiBase) return p
+    if (p.startsWith('http://') || p.startsWith('https://')) return p
+    return `${ipfsApiBase}${p}`
   }
   const pinataGateway = import.meta.env.VITE_PINATA_GATEWAY || 'https://gateway.pinata.cloud/ipfs/'
   const mintGasLimit = (() => {
@@ -240,7 +225,7 @@ export default function App() {
   const templateImgRef = useRef(null)
   const canvasRef = useRef(null)
 
-  const [selectedCollege, setSelectedCollege] = useState('mit')
+  const [selectedCollege, setSelectedCollege] = useState('dypcoe')
   const college = useMemo(() => getCollege(selectedCollege), [selectedCollege])
   const contractAddress = useMemo(() => {
     const base = (import.meta.env.VITE_CONTRACT_ADDRESS || '').trim()
@@ -258,9 +243,8 @@ export default function App() {
 
   const [form, setForm] = useState({
     studentName: '',
-    mobileNumber: '',
     branch: '',
-    college: 'mit',
+    college: 'dypcoe',
   })
 
   const [mintState, setMintState] = useState({
@@ -355,7 +339,6 @@ export default function App() {
 
   const isFormValid =
     !!form.studentName.trim() &&
-    !!form.mobileNumber.trim() &&
     !!form.branch.trim() &&
     !!form.college &&
     !!getCollege(form.college)
@@ -379,7 +362,6 @@ export default function App() {
       if (!canUseMetaMask) throw new Error('MetaMask not detected.')
       if (!contractAddress) throw new Error('Missing VITE_CONTRACT_ADDRESS in .env')
       if (!form.studentName.trim()) throw new Error('Please enter your name.')
-      if (!form.mobileNumber.trim()) throw new Error('Please enter your mobile number.')
       if (!form.branch.trim()) throw new Error('Please enter your branch.')
       if (!form.college || !getCollege(form.college)) throw new Error('Please select your college.')
 
@@ -410,7 +392,7 @@ export default function App() {
           cRead.totalSupplyForEvent(eventId),
           cRead.MAX_SUPPLY_PER_EVENT(),
         ])
-      } catch (readErr) {
+      } catch {
         // Most common cause: VITE_CONTRACT_ADDRESS still points to an older deployment (ABI mismatch).
         const chainName = import.meta.env.VITE_CHAIN_NAME || 'MST Testnet'
         throw new Error(
@@ -485,7 +467,6 @@ export default function App() {
           { trait_type: 'Event Name', value: 'MST Blockchain Workshop' },
           { trait_type: 'College', value: selected.label },
           { trait_type: 'Student Name', value: form.studentName.trim() },
-          { trait_type: 'Mobile Number', value: form.mobileNumber.trim() },
           { trait_type: 'Branch', value: form.branch.trim() },
           { trait_type: 'Issuing Authority', value: 'Masterstroke Academy' },
         ],
@@ -514,7 +495,6 @@ export default function App() {
             from: userAddr,
             eventId: selected.eventId,
             studentName: form.studentName.trim(),
-            mobileNumber: form.mobileNumber.trim(),
             branch: form.branch.trim(),
             tokenURI: metaJson.ipfsUri,
           }),
@@ -534,20 +514,18 @@ export default function App() {
 
       // Send tx with explicit gas settings to avoid MetaMask's flaky estimateGas / fee logic on MST RPCs.
       const c = new ethers.Contract(contractAddress, CONTRACT_ABI, signer)
-      // Force full signature to avoid accidentally encoding the legacy 4-arg selector.
-      const data = c.interface.encodeFunctionData('mintWorkshopCertificate(uint256,string,string,string,string)', [
+      // Force full signature to avoid accidentally encoding an older cached selector.
+      const data = c.interface.encodeFunctionData('mintWorkshopCertificate(uint256,string,string,string)', [
         eventId,
         form.studentName.trim(),
-        form.mobileNumber.trim(),
         form.branch.trim(),
         metaJson.ipfsUri,
       ])
       const selector = String(data || '').slice(0, 10)
-      // eslint-disable-next-line no-console
       console.log('Mint calldata selector:', selector, 'eventId:', eventId.toString())
-      if (selector !== '0x3afd64be') {
+      if (selector !== '0xb59c55a9') {
         throw new Error(
-          `App bug/cached build: mint selector is ${selector} but expected 0x3afd64be. Hard refresh the page and restart dev server.`,
+          `App bug/cached build: mint selector is ${selector} but expected 0xb59c55a9. Hard refresh the page and restart dev server.`,
         )
       }
       const feeOverrides = await getFeeOverrides(readProvider)
@@ -563,7 +541,6 @@ export default function App() {
         })
       } catch (simErr) {
         // Log full details for debugging
-        // eslint-disable-next-line no-console
         console.error('Mint simulation failed:', simErr)
         throw simErr
       }
@@ -631,7 +608,6 @@ export default function App() {
       await refreshStats(userAddr, selected.eventId)
       setMintPhase('')
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error('Mint failed (full error):', err)
       setMintPhase('')
       setMintState((m) => ({
@@ -749,18 +725,6 @@ export default function App() {
                   onChange={(e) => setForm((f) => ({ ...f, studentName: e.target.value }))}
                   placeholder="Enter your full name"
                   autoComplete="name"
-                  required
-                />
-              </label>
-
-              <label className="field">
-                <div className="fieldLabel">Mobile number</div>
-                <input
-                  className="input"
-                  value={form.mobileNumber}
-                  onChange={(e) => setForm((f) => ({ ...f, mobileNumber: e.target.value }))}
-                  placeholder="e.g. 98XXXXXXXX"
-                  inputMode="numeric"
                   required
                 />
               </label>

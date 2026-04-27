@@ -6,12 +6,10 @@ const ROOT = path.resolve(process.cwd())
 const OUT_DIR = path.join(ROOT, 'public', 'certificates')
 
 const SOURCES = [
-  { src: path.join(ROOT, 'BMS-Certi.jpg'), out: 'bms.png' },
-  { src: path.join(ROOT, 'jain-university-certi.jpg'), out: 'jain.png' },
-  // Replace old MIT certificate with MIT-Alandi-certi
-  { src: path.join(ROOT, 'MIT-Alandi-certi.jpg'), out: 'mit.png' },
-  { src: path.join(ROOT, 'reva-university-certi.jpg'), out: 'reva.png' },
-  { src: path.join(ROOT, 'Vidyashilp-University-certi.jpg'), out: 'vidyashilp.png' },
+  // Optional: if you have high-res certificate JPGs, drop them in repo root and run `npm run assets:certificates`.
+  // Otherwise, the app ships with SVG templates in `public/certificates/`.
+  { src: path.join(ROOT, 'DYPCOE-certi.jpg'), out: 'dypcoe.jpeg' },
+  { src: path.join(ROOT, 'Vidyavardhaka-certi.jpg'), out: 'vidyavardhaka.jpeg' },
 ]
 
 async function fileExists(p) {
@@ -39,11 +37,9 @@ async function main() {
   for (const s of SOURCES) {
     const outPath = path.join(OUT_DIR, s.out)
     await sharp(s.src).png({ quality: 95 }).toFile(outPath)
-    // eslint-disable-next-line no-console
     console.log(`Wrote ${path.relative(ROOT, outPath)}`)
   }
 
-  // eslint-disable-next-line no-console
   console.log('Certificate assets ready.')
 }
 

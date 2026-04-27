@@ -17,7 +17,6 @@ contract WorkshopCertificateNFT is ERC721URIStorage {
     struct StudentData {
         uint256 eventId;
         string studentName;
-        string mobileNumber;
         string branch;
         uint256 issuedAt;
     }
@@ -31,7 +30,6 @@ contract WorkshopCertificateNFT is ERC721URIStorage {
         address indexed recipient,
         uint256 indexed eventId,
         string studentName,
-        string mobileNumber,
         string branch,
         string tokenURI
     );
@@ -49,14 +47,12 @@ contract WorkshopCertificateNFT is ERC721URIStorage {
     function mintWorkshopCertificate(
         uint256 eventId,
         string calldata studentName,
-        string calldata mobileNumber,
         string calldata branch,
         string calldata tokenURI_
     ) external returns (uint256) {
         address recipient = msg.sender;
         require(eventId > 0, "Event required");
         require(bytes(studentName).length > 0, "Student name required");
-        require(bytes(mobileNumber).length > 0, "Mobile required");
         require(bytes(branch).length > 0, "Branch required");
         require(bytes(tokenURI_).length > 0, "Token URI required");
         require(mintedForEvent[eventId] < MAX_SUPPLY_PER_EVENT, "All event NFTs minted");
@@ -70,14 +66,13 @@ contract WorkshopCertificateNFT is ERC721URIStorage {
         certificateData[newTokenId] = StudentData({
             eventId: eventId,
             studentName: studentName,
-            mobileNumber: mobileNumber,
             branch: branch,
             issuedAt: block.timestamp
         });
 
         _setTokenURI(newTokenId, tokenURI_);
 
-        emit CertificateMinted(newTokenId, recipient, eventId, studentName, mobileNumber, branch, tokenURI_);
+        emit CertificateMinted(newTokenId, recipient, eventId, studentName, branch, tokenURI_);
         return newTokenId;
     }
 }

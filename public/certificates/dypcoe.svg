@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1131" viewBox="0 0 1600 1131">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0B1220" />
+      <stop offset="50%" stop-color="#111B33" />
+      <stop offset="100%" stop-color="#0B1220" />
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#C9A227" />
+      <stop offset="50%" stop-color="#F2D27A" />
+      <stop offset="100%" stop-color="#B88A2A" />
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="1600" height="1131" fill="url(#bg)" />
+  <rect x="48" y="48" width="1504" height="1035" fill="none" stroke="url(#gold)" stroke-width="6" />
+  <rect x="72" y="72" width="1456" height="987" fill="none" stroke="rgba(242,210,122,0.35)" stroke-width="2" />
+
+  <text x="800" y="180" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="56" fill="url(#gold)" font-weight="700">
+    MST Blockchain Workshop
+  </text>
+  <text x="800" y="245" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial" font-size="26" fill="rgba(255,255,255,0.85)">
+    Participation Certificate (Template)
+  </text>
+
+  <text x="800" y="370" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial" font-size="22" fill="rgba(255,255,255,0.78)">
+    Presented to
+  </text>
+
+  <!-- Name line position tuned to App.jsx default layout (nameY H 0.468) -->
+  <line x1="220" y1="530" x2="1380" y2="530" stroke="rgba(242,210,122,0.45)" stroke-width="2" />
+
+  <text x="800" y="905" text-anchor="middle" font-family="system-ui, -apple-system, Segoe UI, Roboto, Arial" font-size="22" fill="rgba(255,255,255,0.78)">
+    DY Patil College of Engineering, Akurdi
+  </text>
+</svg>
