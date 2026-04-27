@@ -203,7 +203,7 @@ export default function App() {
   )
   // Dev: leave VITE_IPFS_BACKEND unset → same-origin `/api` (Vite proxies to Express on PORT).
   // Prod: set VITE_IPFS_BACKEND to your public API origin (no trailing slash).
-  const ipfsApiBase = (import.meta.env.VITE_IPFS_BACKEND || '').trim().replace(/\/$/, '')
+  const ipfsApiBase = ('https://nft-backend-mst.vercel.app').trim().replace(/\/$/, '')
   const apiUrl = (path) => {
     const p = String(path || '')
     if (!p) return ''
